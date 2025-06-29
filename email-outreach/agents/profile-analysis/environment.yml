@@ -1,0 +1,16 @@
+name: profile-analysis-agent
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.11
+  - pip
+  - curl
+  - pip:
+    - flask==2.3.3
+    - flask-cors==4.0.0
+    - openai==0.28.1
+    - requests==2.31.0
+    - beautifulsoup4==4.12.2
+    - python-dotenv==1.0.0
+    - gunicorn==21.2.0 
