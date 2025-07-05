@@ -5,7 +5,7 @@ Analyzes LinkedIn profiles and extracts structured data for email personalizatio
 
 from flask import Flask, request, jsonify
 from flask_cors import CORS
-import openai
+import google.generativeai as genai  # Replace OpenAI with Gemini
 import requests
 from bs4 import BeautifulSoup
 import json
@@ -27,17 +27,19 @@ app = Flask(__name__)
 CORS(app)
 
 # Configuration
-OPENAI_API_KEY = os.getenv('OPENAI_API_KEY')
+GEMINI_API_KEY = os.getenv('GEMINI_API_KEY')  # Use Gemini API key
 FLASK_ENV = os.getenv('FLASK_ENV', 'development')
 PORT = int(os.getenv('PORT', 8080))
 AGENT_VERSION = os.getenv('AGENT_VERSION', '1.0.0')
 ANALYSIS_DEPTH = os.getenv('ANALYSIS_DEPTH', 'basic')
 
-if OPENAI_API_KEY:
-    openai.api_key = OPENAI_API_KEY
-    logger.info("OpenAI API key loaded successfully")
+# Configure Gemini
+if GEMINI_API_KEY:
+    genai.configure(api_key=GEMINI_API_KEY)
+    model = genai.GenerativeModel('models/gemini-2.5-flash')
+    logger.info("Gemini API configured successfully")
 else:
-    logger.warning("No OpenAI API key found - using mock data")
+    logger.warning("No Gemini API key found - using mock data")
 
 class ProfileAnalysisAgent:
     """A2A-compatible agent for LinkedIn profile analysis"""
@@ -124,22 +126,10 @@ class ProfileAnalysisAgent:
             raise
     
     def analyze_profile_with_ai(self, profile_data: Dict[str, Any]) -> Dict[str, Any]:
-        """Use AI to analyze the profile and extract insights for personalization"""
+        """Use Gemini to analyze the profile and extract insights for personalization"""
         
-        if not OPENAI_API_KEY:
-            # Return mock analysis if no API key
-            return {
-                "personality_traits": ["analytical", "innovative", "collaborative"],
-                "communication_style": "professional",
-                "interests": ["technology", "artificial intelligence", "startups"],
-                "networking_potential": "high",
-                "personalization_hooks": [
-                    "shared_university",
-                    "similar_role", 
-                    "common_interests"
-                ],
-                "ai_analysis": "Mock analysis - configure OpenAI API key for real analysis"
-            }
+        if not GEMINI_API_KEY:
+            return self._get_mock_analysis()
         
         try:
             # Prepare profile summary for AI analysis
@@ -154,50 +144,110 @@ Recent Activity: {json.dumps(profile_data['profile'].get('recent_activity', []))
 """
             
             # AI prompt for profile analysis
-            prompt = f"""
-Analyze this LinkedIn profile and provide insights for email personalization:
+            prompt = """You are a JSON-generating AI. Your task is to analyze a LinkedIn profile and return ONLY a JSON object.
 
-{profile_summary}
+Profile to analyze:
+{profile}
 
-Please provide a JSON response with:
-1. personality_traits: Array of 3-5 key personality traits
-2. communication_style: Professional communication style (formal/casual/technical)
-3. interests: Array of main professional/personal interests  
-4. networking_potential: Assessment (low/medium/high)
-5. personalization_hooks: Array of potential conversation starters
-6. key_achievements: Notable accomplishments to reference
-7. connection_opportunities: Ways to build rapport
+Instructions:
+1. Return ONLY the JSON object shown below
+2. Replace the example values with relevant ones from the profile
+3. Keep the exact same structure and keys
+4. Do not add ANY other text, comments, or explanations
+5. The response must be valid JSON that can be parsed by json.loads()
 
-Focus on actionable insights for crafting personalized outreach emails.
-"""
+Return this exact JSON structure (with your analysis):
+{{
+    "personality_traits": ["analytical", "innovative", "collaborative"],
+    "communication_style": "formal",
+    "interests": ["technology", "AI", "startups"],
+    "networking_potential": "high",
+    "personalization_hooks": [
+        "Shared interest in AI technology",
+        "Both studied at Berkeley"
+    ],
+    "key_achievements": [
+        "Led backend development team",
+        "Implemented AI solutions"
+    ],
+    "connection_opportunities": [
+        "Common background in software engineering",
+        "Mutual interest in AI applications"
+    ]
+}}""".format(profile=profile_summary)
             
-            response = openai.ChatCompletion.create(
-                model="gpt-4",
-                messages=[
-                    {"role": "system", "content": "You are an expert at analyzing professional profiles for networking and outreach purposes. Provide structured, actionable insights."},
-                    {"role": "user", "content": prompt}
-                ],
-                temperature=0.3,
-                max_tokens=1000
-            )
+            # Get response from Gemini
+            response = model.generate_content(prompt)
             
-            # Parse AI response
-            ai_analysis = json.loads(response.choices[0].message.content)
+            # Log the raw response for debugging
+            logger.info(f"Raw Gemini response: {response.text}")
             
-            logger.info("Successfully completed AI analysis of profile")
-            return ai_analysis
+            # Clean and parse the response
+            try:
+                # Clean the response
+                text = response.text.strip()
+                # Remove any markdown code block markers
+                if text.startswith('```'):
+                    text = text.split('```')[1]
+                if text.startswith('json'):
+                    text = text[4:]
+                text = text.strip()
+                
+                # Try to parse as JSON
+                ai_analysis = json.loads(text)
+                logger.info("Successfully parsed Gemini response as JSON")
+                return ai_analysis
+                
+            except json.JSONDecodeError as e:
+                logger.error(f"Invalid JSON from Gemini: {text}")
+                logger.error(f"JSON Error: {str(e)}")
+                return {
+                    "personality_traits": ["analytical", "innovative"],
+                    "communication_style": "professional",
+                    "interests": ["software engineering", "AI technology"],
+                    "networking_potential": "high",
+                    "personalization_hooks": [
+                        "Experience in AI and software development",
+                        "Background in computer science"
+                    ],
+                    "key_achievements": [
+                        "Senior Software Engineer role",
+                        "Backend development leadership"
+                    ],
+                    "connection_opportunities": [
+                        "Shared interest in AI technology",
+                        "Similar technical background"
+                    ],
+                    "ai_analysis_error": f"Using fallback analysis. Raw response: {text}"
+                }
             
         except Exception as e:
             logger.error(f"Error in AI analysis: {str(e)}")
-            # Return fallback analysis
-            return {
-                "personality_traits": ["professional"],
-                "communication_style": "formal",
-                "interests": ["career_development"],
-                "networking_potential": "medium", 
-                "personalization_hooks": ["professional_background"],
-                "ai_analysis_error": str(e)
-            }
+            return self._get_mock_analysis(error=str(e))
+    
+    def _get_mock_analysis(self, error=None):
+        """Return mock analysis data"""
+        analysis = {
+            "personality_traits": ["analytical", "innovative"],
+            "communication_style": "professional",
+            "interests": ["software engineering", "AI technology"],
+            "networking_potential": "high",
+            "personalization_hooks": [
+                "Experience in AI and software development",
+                "Background in computer science"
+            ],
+            "key_achievements": [
+                "Senior Software Engineer role",
+                "Backend development leadership"
+            ],
+            "connection_opportunities": [
+                "Shared interest in AI technology",
+                "Similar technical background"
+            ]
+        }
+        if error:
+            analysis["ai_analysis_error"] = error
+        return analysis
     
     def process_task(self, task_data: Dict[str, Any]) -> Dict[str, Any]:
         """Main A2A task processing method"""
