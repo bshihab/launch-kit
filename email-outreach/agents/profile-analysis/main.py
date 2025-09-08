@@ -14,6 +14,7 @@ from datetime import datetime
 import logging
 from typing import Dict, Any, Optional
 from dotenv import load_dotenv
+from scraperapi.client import ScraperAPIClient
 
 # Load environment variables
 load_dotenv()
@@ -28,6 +29,7 @@ CORS(app)
 
 # Configuration
 GEMINI_API_KEY = os.getenv('GEMINI_API_KEY')  # Use Gemini API key
+SCRAPER_API_KEY = os.getenv('SCRAPER_API_KEY') # Add ScraperAPI key
 FLASK_ENV = os.getenv('FLASK_ENV', 'development')
 PORT = int(os.getenv('PORT', 8080))
 AGENT_VERSION = os.getenv('AGENT_VERSION', '1.0.0')
@@ -75,46 +77,35 @@ class ProfileAnalysisAgent:
     
     def extract_linkedin_profile(self, linkedin_url: str) -> Dict[str, Any]:
         """
-        Extract profile data from LinkedIn URL
-        Note: In production, this would use LinkedIn API or specialized scraping tools
-        For now, we'll simulate the extraction and use AI to generate realistic data
+        Extract profile data from LinkedIn URL using ScraperAPI and BeautifulSoup.
         """
+        if not SCRAPER_API_KEY:
+            logger.warning("No ScraperAPI key found - LinkedIn scraping may be unreliable.")
+            # Fallback to direct request for local testing without a key
+            response_text = requests.get(linkedin_url).text
+        else:
+            client = ScraperAPIClient(SCRAPER_API_KEY)
+            response = client.get(linkedin_url)
+            response.raise_for_status()
+            response_text = response.text
+
         try:
-            # Simulate profile extraction (in production, use proper LinkedIn API)
-            # For demo purposes, we'll generate realistic profile data
+            soup = BeautifulSoup(response_text, 'html.parser')
+
+            # Extracting basic information (selectors may need to be updated)
+            name = soup.find('h1', {'class': 'top-card-layout__title'}).get_text(strip=True) if soup.find('h1', {'class': 'top-card-layout__title'}) else "N/A"
+            headline = soup.find('h2', {'class': 'top-card-layout__headline'}).get_text(strip=True) if soup.find('h2', {'class': 'top-card-layout__headline'}) else "N/A"
+            about = soup.find('div', {'class': 'core-section-container__content'}).get_text(strip=True) if soup.find('div', {'class': 'core-section-container__content'}) else "N/A"
+
             profile_data = {
                 "url": linkedin_url,
-                "extraction_method": "simulated",  # In production: "linkedin_api" or "scraping"
+                "extraction_method": "scraping",
                 "extracted_at": datetime.now().isoformat(),
                 "profile": {
-                    "name": "Sample Profile",
-                    "headline": "Software Engineer at Tech Company", 
-                    "location": "San Francisco, CA",
-                    "connections": "500+",
-                    "about": "Passionate software engineer with 5+ years of experience...",
-                    "experience": [
-                        {
-                            "title": "Senior Software Engineer",
-                            "company": "Tech Company",
-                            "duration": "2022 - Present",
-                            "description": "Leading backend development for AI-powered applications"
-                        }
-                    ],
-                    "education": [
-                        {
-                            "school": "University of California, Berkeley",
-                            "degree": "Bachelor of Science in Computer Science", 
-                            "years": "2017 - 2021"
-                        }
-                    ],
-                    "skills": ["Python", "Machine Learning", "AWS", "React"],
-                    "recent_activity": [
-                        {
-                            "type": "post",
-                            "content": "Excited about the latest developments in AI...",
-                            "date": "2024-06-20"
-                        }
-                    ]
+                    "name": name,
+                    "headline": headline,
+                    "about": about,
+                    # Add more fields as needed
                 }
             }
             
@@ -122,7 +113,7 @@ class ProfileAnalysisAgent:
             return profile_data
             
         except Exception as e:
-            logger.error(f"Error extracting profile from {linkedin_url}: {str(e)}")
+            logger.error(f"Error parsing profile from {linkedin_url}: {str(e)}")
             raise
     
     def analyze_profile_with_ai(self, profile_data: Dict[str, Any]) -> Dict[str, Any]:
@@ -137,10 +128,6 @@ class ProfileAnalysisAgent:
 Name: {profile_data['profile'].get('name', 'Unknown')}
 Headline: {profile_data['profile'].get('headline', 'No headline')}
 About: {profile_data['profile'].get('about', 'No about section')}
-Experience: {json.dumps(profile_data['profile'].get('experience', []))}
-Education: {json.dumps(profile_data['profile'].get('education', []))}
-Skills: {', '.join(profile_data['profile'].get('skills', []))}
-Recent Activity: {json.dumps(profile_data['profile'].get('recent_activity', []))}
 """
             
             # AI prompt for profile analysis
@@ -278,7 +265,7 @@ Return this exact JSON structure (with your analysis):
                     "extraction_metadata": {
                         "processed_at": datetime.now().isoformat(),
                         "analysis_depth": analysis_depth,
-                        "data_quality": "high" if profile_data['profile']['name'] != "Sample Profile" else "simulated"
+                        "data_quality": "high" if profile_data['profile']['name'] != "N/A" else "scraped"
                     }
                 },
                 "next_suggested_agents": [
