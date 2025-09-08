@@ -3,21 +3,36 @@ Profile Analysis Agent - A2A Compatible
 Analyzes LinkedIn profiles and extracts structured data for email personalization
 """
 
+import sys
+import os
+from pathlib import Path
+
+# Add project root to the Python path to allow for shared module imports
+def find_project_root(marker=".git"):
+    """Finds the project root by searching upwards for a marker file or directory."""
+    current_path = Path(__file__).parent
+    for parent in [current_path] + list(current_path.parents):
+        if (parent / marker).exists():
+            return parent
+    raise FileNotFoundError(f"Project root marker '{marker}' not found.")
+
+project_root = find_project_root()
+if str(project_root) not in sys.path:
+    sys.path.insert(0, str(project_root))
+
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 import google.generativeai as genai  # Replace OpenAI with Gemini
 import requests
 from bs4 import BeautifulSoup
 import json
-import os
 from datetime import datetime
 import logging
 from typing import Dict, Any, Optional
-from dotenv import load_dotenv
 from scraperapi_sdk import ScraperAPIClient
+from shared.utils import config # Now this will work correctly
 
-# Load environment variables
-load_dotenv()
+# The config loader runs automatically when imported, so no need to call load_dotenv()
 
 # Configure logging
 log_level = os.getenv('LOG_LEVEL', 'INFO')
@@ -92,10 +107,21 @@ class ProfileAnalysisAgent:
         try:
             soup = BeautifulSoup(response_text, 'html.parser')
 
-            # Extracting basic information (selectors may need to be updated)
-            name = soup.find('h1', {'class': 'top-card-layout__title'}).get_text(strip=True) if soup.find('h1', {'class': 'top-card-layout__title'}) else "N/A"
-            headline = soup.find('h2', {'class': 'top-card-layout__headline'}).get_text(strip=True) if soup.find('h2', {'class': 'top-card-layout__headline'}) else "N/A"
-            about = soup.find('div', {'class': 'core-section-container__content'}).get_text(strip=True) if soup.find('div', {'class': 'core-section-container__content'}) else "N/A"
+            # Updated selectors for LinkedIn public profiles (as of late 2025)
+            name_element = soup.find('h1', class_='text-heading-xlarge')
+            name = name_element.get_text(strip=True) if name_element else "N/A"
+
+            headline_element = soup.find('div', class_='text-body-medium')
+            headline = headline_element.get_text(strip=True) if headline_element else "N/A"
+            
+            # The 'about' section is often within a div with the id 'about'
+            # This is a more complex selector to get the text directly following the 'About' h2
+            about_section = soup.find('section', id='about')
+            about = "N/A"
+            if about_section:
+                about_text_element = about_section.find('div', class_='inline-show-more-text')
+                if about_text_element:
+                    about = about_text_element.get_text(strip=True)
 
             profile_data = {
                 "url": linkedin_url,
