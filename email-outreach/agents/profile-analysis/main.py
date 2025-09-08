@@ -14,7 +14,7 @@ from datetime import datetime
 import logging
 from typing import Dict, Any, Optional
 from dotenv import load_dotenv
-from scraperapi.client import ScraperAPIClient
+from scraperapi_sdk import ScraperAPIClient
 
 # Load environment variables
 load_dotenv()
